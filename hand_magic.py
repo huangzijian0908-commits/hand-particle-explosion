@@ -13,7 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "models" / "hand_landmarker.task"
 
-PARTICLE_COUNT = 4000
+PARTICLE_COUNT = 2400
 EXPLOSION_FORCE = 42.0
 HAND_INFLUENCE = 0.018
 FRICTION = 0.945
@@ -26,6 +26,20 @@ class HandState:
     palm: tuple[float, float] | None = None
     closed: bool = False
     visible: bool = False
+
+
+def orient_camera_frame(frame: np.ndarray, rotation: int, mirror: bool) -> np.ndarray:
+    if rotation == 90:
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    elif rotation == 180:
+        frame = cv2.rotate(frame, cv2.ROTATE_180)
+    elif rotation == 270:
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+    if mirror:
+        frame = cv2.flip(frame, 1)
+
+    return frame
 
 
 class ParticleField:
@@ -44,9 +58,9 @@ class ParticleField:
         self.radius = np.random.uniform(1.0, 2.4, count).astype(np.float32)
         self.colors = np.column_stack(
             (
-                np.random.uniform(180, 255, count),
-                np.random.uniform(90, 230, count),
-                np.random.uniform(80, 255, count),
+                np.random.uniform(190, 255, count),
+                np.random.uniform(120, 230, count),
+                np.random.uniform(40, 120, count),
             )
         ).astype(np.uint8)
 
@@ -100,10 +114,10 @@ class ParticleField:
         size_boost = int(1 + fist_energy * 2)
         for index, (x, y) in enumerate(self.positions.astype(np.int32)):
             if 0 <= x < self.width and 0 <= y < self.height:
-                radius = int(self.radius[index]) + size_boost
+                radius = max(1, int(self.radius[index])) + size_boost
                 color = tuple(int(v) for v in self.colors[index])
                 cv2.circle(glow, (x, y), radius, color, -1, lineType=cv2.LINE_AA)
-        cv2.addWeighted(glow, 0.88, frame, 1.0, 0, dst=frame)
+        cv2.addWeighted(glow, 0.72, frame, 1.0, 0, dst=frame)
 
 
 def ensure_model_exists() -> None:
@@ -156,7 +170,7 @@ def draw_hud(frame: np.ndarray, hand: HandState, fps: float) -> None:
     lines = [
         "Hand Particle Explosion",
         f"{status}   {fps:>2.0f} fps",
-        "Close your hand to explode. Press Q to quit.",
+        "R rotate camera. M mirror. Q quit.",
     ]
     x, y = 18, 28
     for line in lines:
@@ -168,6 +182,38 @@ def draw_hud(frame: np.ndarray, hand: HandState, fps: float) -> None:
         center = (int(hand.palm[0]), int(hand.palm[1]))
         cv2.circle(frame, center, 34 if hand.closed else 24, (125, 242, 194), 2, cv2.LINE_AA)
         cv2.circle(frame, center, 5, (255, 170, 80), -1, cv2.LINE_AA)
+
+
+def draw_camera_preview(frame: np.ndarray, camera_frame: np.ndarray, result) -> None:
+    height, width = frame.shape[:2]
+    preview_width = max(220, width // 5)
+    preview_height = int(preview_width * camera_frame.shape[0] / camera_frame.shape[1])
+    preview = cv2.resize(camera_frame, (preview_width, preview_height))
+    preview = cv2.addWeighted(preview, 0.65, np.zeros_like(preview), 0.35, 0)
+
+    if result.hand_landmarks:
+        for hand_landmarks in result.hand_landmarks:
+            for landmark in hand_landmarks:
+                x = int(landmark.x * preview_width)
+                y = int(landmark.y * preview_height)
+                cv2.circle(preview, (x, y), 3, (125, 242, 194), -1, cv2.LINE_AA)
+
+    x0 = width - preview_width - 18
+    y0 = 18
+    x1 = x0 + preview_width
+    y1 = y0 + preview_height
+    frame[y0:y1, x0:x1] = preview
+    cv2.rectangle(frame, (x0, y0), (x1, y1), (70, 85, 105), 1, cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        "camera",
+        (x0 + 10, y0 + 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        (235, 244, 255),
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def main() -> None:
@@ -182,12 +228,12 @@ def main() -> None:
         base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=VisionRunningMode.VIDEO,
         num_hands=2,
-        min_hand_detection_confidence=0.55,
-        min_hand_presence_confidence=0.55,
-        min_tracking_confidence=0.55,
+        min_hand_detection_confidence=0.35,
+        min_hand_presence_confidence=0.35,
+        min_tracking_confidence=0.35,
     )
 
-    camera = cv2.VideoCapture(0)
+    camera = cv2.VideoCapture(1)
     if not camera.isOpened():
         raise RuntimeError("Could not open the webcam.")
 
@@ -201,6 +247,8 @@ def main() -> None:
     fist_energy = 0.0
     last_time = time.perf_counter()
     fps = 0.0
+    camera_rotation = 0
+    camera_mirror = True
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
 
@@ -210,7 +258,7 @@ def main() -> None:
             if not ok:
                 break
 
-            frame = cv2.flip(frame, 1)
+            frame = orient_camera_frame(frame, camera_rotation, camera_mirror)
             height, width = frame.shape[:2]
             if width != field.width or height != field.height:
                 field.resize(width, height)
@@ -230,6 +278,7 @@ def main() -> None:
             canvas[:] = (8, 9, 13)
             field.update(hand, fist_energy)
             field.draw(canvas, fist_energy)
+            draw_camera_preview(canvas, frame, result)
             draw_hud(canvas, hand, fps)
 
             now = time.perf_counter()
@@ -241,6 +290,11 @@ def main() -> None:
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
+            if key == ord("r"):
+                camera_rotation = (camera_rotation + 90) % 360
+                field = ParticleField(width, height, PARTICLE_COUNT)
+            if key == ord("m"):
+                camera_mirror = not camera_mirror
 
     camera.release()
     cv2.destroyAllWindows()
