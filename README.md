@@ -25,6 +25,10 @@ The project may later become the base technology for a particle-style avatar or 
 - Particle explosion effect
 - Camera rotation and mirror controls
 
+## Point should be carefull
+
+-Newest Python may not be coping with these code so 3.12.12 or 3.11.11 is the best environment for this
+
 ## Controls
 
 ```text
