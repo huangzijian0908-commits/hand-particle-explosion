@@ -8,6 +8,7 @@ When you close your hand into a fist, the particles explode outward.
 ## Introduction
 This project's idea, concept, direction, testing was done by me.
 But the implementation support was provided with AI assistance.
+It worked on surface go 4 too so Almost every computer in this world can download and use this code.
 
 ## Concept
 
