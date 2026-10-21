@@ -29,7 +29,7 @@ The project may later become the base technology for a particle-style avatar or 
 ## Point should be carefull
 
 -Newest Python may not be coping with these code so 3.12.12 or 3.11.11 is the best environment for this
-
+-The graphic will depend on your computer
 ## Controls
 
 ```text
